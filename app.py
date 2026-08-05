@@ -6,14 +6,35 @@ from sqlalchemy import create_engine, text, event
 from databricks.sdk import WorkspaceClient
 from datetime import datetime
 
+# Load environment variables from .env file (for local development)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed, use system env vars
+
 # Initialize Databricks client
 w = WorkspaceClient()
 
-# Database configuration from environment variables
-db_host = os.environ.get('PGHOST')
-db_name = os.environ.get('PGDATABASE', 'support-system')
-db_user = os.environ.get('PGUSER')
-db_port = os.environ.get('PGPORT', 5432)
+# Database configuration - try Databricks Secrets first, then env vars
+def get_config(secret_scope="lakebase", key=None, env_var=None, default=None):
+    """Get configuration from Databricks Secrets or environment variables"""
+    try:
+        # Try Databricks Secrets first
+        if key:
+            value = w.secrets.get_secret(scope=secret_scope, key=key)
+            if value and value.value:
+                return value.value
+    except Exception:
+        pass  # Secrets not available, fall back to env vars
+    
+    # Fall back to environment variables
+    return os.environ.get(env_var, default)
+
+db_host = get_config(key="pghost", env_var="PGHOST")
+db_name = get_config(key="pgdatabase", env_var="PGDATABASE", default="support-system")
+db_user = get_config(key="pguser", env_var="PGUSER")
+db_port = int(get_config(key="pgport", env_var="PGPORT", default="5432"))
 
 # Global password management for token refresh
 postgres_password = None
