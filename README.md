@@ -13,7 +13,7 @@ A full-stack support ticket management application built with Databricks Apps an
 ## Architecture
 
 ### Backend
-- **Database**: Lakebase Postgres (`support-system` database)
+- **Database**: Lakebase Postgres (`support-app` database)
 - **Schema**: `service_mgmt`
 - **Tables**: 
   - `tickets` - Stores ticket information (ticket_id, title, status, created_by, created_at)

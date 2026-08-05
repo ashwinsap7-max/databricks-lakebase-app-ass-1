@@ -32,7 +32,7 @@ def get_config(secret_scope="lakebase", key=None, env_var=None, default=None):
     return os.environ.get(env_var, default)
 
 db_host = get_config(key="pghost", env_var="PGHOST")
-db_name = get_config(key="pgdatabase", env_var="PGDATABASE", default="support-system")
+db_name = get_config(key="pgdatabase", env_var="PGDATABASE", default="support-app")
 db_user = get_config(key="pguser", env_var="PGUSER")
 db_port = int(get_config(key="pgport", env_var="PGPORT", default="5432"))
 
