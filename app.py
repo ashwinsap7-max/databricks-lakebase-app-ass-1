@@ -1,9 +1,6 @@
 import os
-import uuid
-import time
 import streamlit as st
-from sqlalchemy import create_engine, text, event
-from databricks.sdk import WorkspaceClient
+from sqlalchemy import create_engine, text
 from datetime import datetime
 
 # Load environment variables from .env file (for local development)
@@ -13,9 +10,6 @@ try:
 except ImportError:
     pass  # python-dotenv not installed, use system env vars
 
-# Initialize Databricks client
-w = WorkspaceClient()
-
 # Database configuration - use Databricks App resource environment variables
 # When a database resource is configured in app.yaml, Databricks injects connection details
 resource_name = "lakebase-postgres"  # matches the resource name in app.yaml
@@ -23,30 +17,13 @@ resource_name = "lakebase-postgres"  # matches the resource name in app.yaml
 db_host = os.environ.get(f"{resource_name.upper().replace('-', '_')}_HOST")
 db_name = os.environ.get(f"{resource_name.upper().replace('-', '_')}_DATABASE", "support-app")
 db_user = os.environ.get(f"{resource_name.upper().replace('-', '_')}_USER")
+db_password = os.environ.get(f"{resource_name.upper().replace('-', '_')}_PASSWORD")
 db_port = int(os.environ.get(f"{resource_name.upper().replace('-', '_')}_PORT", "5432"))
 
-# Global password management for token refresh
-postgres_password = None
-last_password_refresh = 0
-
-# Create SQLAlchemy engine
+# Create SQLAlchemy engine with credentials from app resource
 engine = create_engine(
-    f"postgresql+psycopg2://{db_user}:@{db_host}:{db_port}/{db_name}"
+    f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?sslmode=require"
 )
-
-@event.listens_for(engine, "do_connect")
-def provide_token(dialect, conn_rec, cargs, cparams):
-    """Auto-refresh OAuth token every 15 minutes"""
-    global postgres_password, last_password_refresh
-    if postgres_password is None or time.time() - last_password_refresh > 900:
-        cred = w.database.generate_database_credential(
-            request_id=str(uuid.uuid4()),
-            instance_names=[db_name]
-        )
-        postgres_password = cred.token
-        last_password_refresh = time.time()
-    cparams["password"] = postgres_password
-    cparams["sslmode"] = "require"
 
 # Helper functions
 def get_all_tickets():
