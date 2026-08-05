@@ -16,25 +16,14 @@ except ImportError:
 # Initialize Databricks client
 w = WorkspaceClient()
 
-# Database configuration - try Databricks Secrets first, then env vars
-def get_config(secret_scope="lakebase", key=None, env_var=None, default=None):
-    """Get configuration from Databricks Secrets or environment variables"""
-    try:
-        # Try Databricks Secrets first
-        if key:
-            value = w.secrets.get_secret(scope=secret_scope, key=key)
-            if value and value.value:
-                return value.value
-    except Exception:
-        pass  # Secrets not available, fall back to env vars
-    
-    # Fall back to environment variables
-    return os.environ.get(env_var, default)
+# Database configuration - use Databricks App resource environment variables
+# When a database resource is configured in app.yaml, Databricks injects connection details
+resource_name = "lakebase-postgres"  # matches the resource name in app.yaml
 
-db_host = get_config(key="pghost", env_var="PGHOST")
-db_name = get_config(key="pgdatabase", env_var="PGDATABASE", default="support-app")
-db_user = get_config(key="pguser", env_var="PGUSER")
-db_port = int(get_config(key="pgport", env_var="PGPORT", default="5432"))
+db_host = os.environ.get(f"{resource_name.upper().replace('-', '_')}_HOST")
+db_name = os.environ.get(f"{resource_name.upper().replace('-', '_')}_DATABASE", "support-app")
+db_user = os.environ.get(f"{resource_name.upper().replace('-', '_')}_USER")
+db_port = int(os.environ.get(f"{resource_name.upper().replace('-', '_')}_PORT", "5432"))
 
 # Global password management for token refresh
 postgres_password = None
