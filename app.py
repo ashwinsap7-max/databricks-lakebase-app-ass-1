@@ -10,12 +10,12 @@ try:
 except ImportError:
     pass  # python-dotenv not installed, use system env vars
 
-# Database configuration - Databricks Apps automatically injects these env vars
-# when a Lakebase resource is configured in app.yaml
-db_host = os.environ.get("PGHOST")
+# Database configuration
+# Use environment variables if available, otherwise use direct connection details
+db_host = os.environ.get("PGHOST") or "dbc-b94e27de-a220.cloud.databricks.com"
 db_name = os.environ.get("PGDATABASE", "support-app")
-db_user = os.environ.get("PGUSER")
-db_password = os.environ.get("PGPASSWORD", "")  # Try PGPASSWORD first
+db_user = os.environ.get("PGUSER") or os.environ.get("DATABRICKS_CLIENT_ID", "")
+db_password = os.environ.get("PGPASSWORD", "")
 db_port = int(os.environ.get("PGPORT", "5432"))
 
 # Create SQLAlchemy engine with credentials
