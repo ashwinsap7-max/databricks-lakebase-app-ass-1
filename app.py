@@ -1,22 +1,25 @@
 import os
 import streamlit as st
 from sqlalchemy import create_engine, text
+from databricks.sdk import WorkspaceClient
 from datetime import datetime
 
-# Load environment variables from .env file (for local development)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass  # python-dotenv not installed, use system env vars
+# Initialize Databricks client
+w = WorkspaceClient()
 
-# Database configuration
-# Use environment variables if available, otherwise use direct connection details
-db_host = os.environ.get("PGHOST") or "dbc-b94e27de-a220.cloud.databricks.com"
-db_name = os.environ.get("PGDATABASE", "support-app")
-db_user = os.environ.get("PGUSER") or os.environ.get("DATABRICKS_CLIENT_ID", "")
-db_password = os.environ.get("PGPASSWORD", "")
-db_port = int(os.environ.get("PGPORT", "5432"))
+# Database configuration - read from Databricks Secrets
+secret_scope = "lakebase"  # The secret scope name
+
+try:
+    db_host = w.secrets.get_secret(scope=secret_scope, key="pghost").value
+    db_user = w.secrets.get_secret(scope=secret_scope, key="pguser").value
+    db_password = w.secrets.get_secret(scope=secret_scope, key="pgpassword").value
+    db_name = w.secrets.get_secret(scope=secret_scope, key="pgdatabase").value
+    db_port = int(w.secrets.get_secret(scope=secret_scope, key="pgport").value)
+except Exception as e:
+    st.error(f"Failed to read database secrets: {e}")
+    st.info("Please ensure the 'lakebase' secret scope exists with keys: pghost, pguser, pgpassword, pgdatabase, pgport")
+    st.stop()
 
 # Create SQLAlchemy engine with credentials
 engine = create_engine(
