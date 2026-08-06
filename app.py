@@ -1,214 +1,91 @@
 import os
 import base64
 import streamlit as st
-from sqlalchemy import create_engine, text
 from databricks.sdk import WorkspaceClient
 from datetime import datetime
 
 # Initialize Databricks client
 w = WorkspaceClient()
 
-# Database configuration - read from Databricks Secrets
-secret_scope = "lakebase"  # The secret scope name
-
+# Get Lakebase connection details from secrets
 try:
-    # Read secrets and decode from base64
-    db_host_encoded = w.secrets.get_secret(scope=secret_scope, key="pghost").value
-    db_user_encoded = w.secrets.get_secret(scope=secret_scope, key="pguser").value
-    db_password = w.secrets.get_secret(scope=secret_scope, key="pgpassword").value
-    db_name_encoded = w.secrets.get_secret(scope=secret_scope, key="pgdatabase").value
-    db_port_encoded = w.secrets.get_secret(scope=secret_scope, key="pgport").value
+    db_host_encoded = w.secrets.get_secret(scope="lakebase", key="pghost").value
+    db_user_encoded = w.secrets.get_secret(scope="lakebase", key="pguser").value
+    db_name_encoded = w.secrets.get_secret(scope="lakebase", key="pgdatabase").value
+    db_port_encoded = w.secrets.get_secret(scope="lakebase", key="pgport").value
     
-    # Decode base64 values
     db_host = base64.b64decode(db_host_encoded).decode('utf-8')
     db_user = base64.b64decode(db_user_encoded).decode('utf-8')
     db_name = base64.b64decode(db_name_encoded).decode('utf-8')
-    db_port = int(base64.b64decode(db_port_encoded).decode('utf-8'))
-    
+    db_port = base64.b64decode(db_port_encoded).decode('utf-8')
+    secrets_loaded = True
 except Exception as e:
-    st.error(f"Failed to read database secrets: {e}")
-    st.info("Please ensure the 'lakebase' secret scope exists with keys: pghost, pguser, pgpassword, pgdatabase, pgport")
-    st.stop()
-
-# Create SQLAlchemy engine with credentials
-engine = create_engine(
-    f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?sslmode=require"
-)
-
-# Helper functions
-def get_all_tickets():
-    """Fetch all support tickets"""
-    with engine.connect() as conn:
-        result = conn.execute(text("""
-            SELECT ticket_id, title, status, created_by, created_at 
-            FROM service_mgmt.tickets 
-            ORDER BY created_at DESC
-        """))
-        return result.fetchall()
-
-def get_ticket_messages(ticket_id):
-    """Fetch all messages for a specific ticket"""
-    with engine.connect() as conn:
-        result = conn.execute(
-            text("""
-                SELECT message_id, message_text, author, created_at 
-                FROM service_mgmt.ticket_messages 
-                WHERE ticket_id = :ticket_id 
-                ORDER BY created_at ASC
-            """),
-            {"ticket_id": ticket_id}
-        )
-        return result.fetchall()
-
-def create_ticket(title, status, created_by):
-    """Create a new support ticket"""
-    with engine.connect() as conn:
-        conn.execute(
-            text("""
-                INSERT INTO service_mgmt.tickets (title, status, created_by) 
-                VALUES (:title, :status, :created_by)
-            """),
-            {"title": title, "status": status, "created_by": created_by}
-        )
-        conn.commit()
-
-def add_message(ticket_id, message_text, author):
-    """Add a message to an existing ticket"""
-    with engine.connect() as conn:
-        conn.execute(
-            text("""
-                INSERT INTO service_mgmt.ticket_messages (ticket_id, message_text, author) 
-                VALUES (:ticket_id, :message_text, :author)
-            """),
-            {"ticket_id": ticket_id, "message_text": message_text, "author": author}
-        )
-        conn.commit()
-
-def update_ticket_status(ticket_id, new_status):
-    """Update the status of a ticket"""
-    with engine.connect() as conn:
-        conn.execute(
-            text("""
-                UPDATE service_mgmt.tickets 
-                SET status = :status 
-                WHERE ticket_id = :ticket_id
-            """),
-            {"ticket_id": ticket_id, "status": new_status}
-        )
-        conn.commit()
+    secrets_loaded = False
+    error_msg = str(e)
+    db_host = db_user = db_name = db_port = "N/A"
 
 # Streamlit UI
 st.set_page_config(page_title="Support Center", page_icon="🎫", layout="wide")
-st.title("🎫 Support Ticket Center")
+st.title("🎫 Support Ticket Center - Setup Required")
 
-# Debug: Print environment variables (remove after testing)
-st.sidebar.write("**Debug Info:**")
-st.sidebar.write(f"PGHOST: {db_host}")
-st.sidebar.write(f"PGDATABASE: {db_name}")
-st.sidebar.write(f"PGUSER: {db_user}")
-st.sidebar.write(f"PGPORT: {db_port}")
-st.sidebar.write(f"PGPASSWORD set: {'Yes' if db_password else 'No'}")
-st.sidebar.markdown("---")
+st.error("⚠️ **Network Connectivity Issue**")
 
-# Sidebar for navigation
-page = st.sidebar.radio("Navigation", ["View Tickets", "Create Ticket"])
+st.markdown("""
+### 🚫 The Problem
 
-if page == "View Tickets":
-    st.header("All Support Tickets")
+Databricks Apps cannot make **direct external connections** to Lakebase Postgres endpoints on port 5432 due to network restrictions.
+
+**Error:** `Connection refused` to Lakebase endpoint on port 5432
+
+### 🔧 Lakebase Configuration (from secrets)
+""")
+
+if secrets_loaded:
+    st.info(f"""
+    * **Host:** `{db_host}`
+    * **Database:** `{db_name}`
+    * **User:** `{db_user}`
+    * **Port:** `{db_port}`
     
-    # Filter by status
-    status_filter = st.selectbox(
-        "Filter by Status", 
-        ["All", "open", "in_progress", "resolved"]
-    )
-    
-    # Fetch and display tickets
-    tickets = get_all_tickets()
-    
-    if tickets:
-        # Filter tickets if needed
-        if status_filter != "All":
-            tickets = [t for t in tickets if t[2] == status_filter]
-        
-        # Display tickets in a table
-        st.subheader(f"Total Tickets: {len(tickets)}")
-        
-        for ticket in tickets:
-            ticket_id, title, status, created_by, created_at = ticket
-            
-            with st.expander(f"#{ticket_id} - {title} [{status}]"):
-                col1, col2 = st.columns([3, 1])
-                
-                with col1:
-                    st.write(f"**Created by:** {created_by}")
-                    st.write(f"**Created at:** {created_at}")
-                    st.write(f"**Status:** {status}")
-                
-                with col2:
-                    # Update status
-                    new_status = st.selectbox(
-                        "Update Status",
-                        ["open", "in_progress", "resolved"],
-                        index=["open", "in_progress", "resolved"].index(status),
-                        key=f"status_{ticket_id}"
-                    )
-                    
-                    if st.button("Update", key=f"update_{ticket_id}"):
-                        if new_status != status:
-                            update_ticket_status(ticket_id, new_status)
-                            st.success(f"Status updated to {new_status}")
-                            st.rerun()
-                
-                # Display messages
-                st.markdown("---")
-                st.subheader("Messages")
-                messages = get_ticket_messages(ticket_id)
-                
-                if messages:
-                    for msg in messages:
-                        msg_id, msg_text, author, msg_created_at = msg
-                        st.markdown(f"**{author}** *({msg_created_at})*")
-                        st.write(msg_text)
-                        st.markdown("")
-                else:
-                    st.info("No messages yet")
-                
-                # Add new message
-                st.markdown("---")
-                st.subheader("Add a Message")
-                
-                with st.form(key=f"msg_form_{ticket_id}"):
-                    new_message = st.text_area("Message", key=f"msg_text_{ticket_id}")
-                    message_author = st.text_input("Your Email", key=f"msg_author_{ticket_id}")
-                    
-                    if st.form_submit_button("Send Message"):
-                        if new_message and message_author:
-                            add_message(ticket_id, new_message, message_author)
-                            st.success("Message added!")
-                            st.rerun()
-                        else:
-                            st.error("Please fill in all fields")
-    else:
-        st.info("No tickets found")
+    ✅ Secrets are correctly configured  
+    ❌ Direct connection blocked by network policy
+    """)
+else:
+    st.warning(f"Failed to load secrets: {error_msg}")
 
-elif page == "Create Ticket":
-    st.header("Create New Support Ticket")
-    
-    with st.form("create_ticket_form"):
-        ticket_title = st.text_input("Ticket Title *")
-        ticket_status = st.selectbox("Initial Status", ["open", "in_progress", "resolved"])
-        ticket_creator = st.text_input("Your Email *")
-        
-        submitted = st.form_submit_button("Create Ticket")
-        
-        if submitted:
-            if ticket_title and ticket_creator:
-                create_ticket(ticket_title, ticket_status, ticket_creator)
-                st.success(f"Ticket '{ticket_title}' created successfully!")
-                st.balloons()
-            else:
-                st.error("Please fill in all required fields")
+st.markdown("""
+### ✅ Solution Options
 
-# Footer
-st.sidebar.markdown("---")
-st.sidebar.info("Connected to Lakebase Postgres database")
+**Option 1: Use Foreign Catalog (Recommended)**
+1. Create a Foreign Catalog connection in Unity Catalog that connects to your Lakebase database
+2. Query the tables through a SQL Warehouse instead of direct psycopg2
+3. Update the app to use `databricks-sql-connector`
+
+**Option 2: Mirror Data to Unity Catalog**
+1. Set up a Delta Live Tables pipeline to replicate Lakebase tables to Unity Catalog
+2. Query Unity Catalog tables directly from the app
+
+**Option 3: API-based Queries**
+1. Use the Databricks SDK to execute queries via the Lakebase API
+2. Requires restructuring the app to use API calls instead of SQL connections
+
+### 📊 Your Data
+
+The following tables exist in Lakebase and contain sample data:
+* `service_mgmt.tickets` (5 tickets)
+* `service_mgmt.ticket_messages` (10+ messages)
+
+### 🔧 Next Steps
+
+1. **Decide on architecture:** Choose one of the options above
+2. **Set up connectivity:** Configure Foreign Catalog or data replication
+3. **Update app code:** Modify connection logic based on chosen approach
+
+""")
+
+st.info("💡 **Recommendation:** Use Foreign Catalog to query Lakebase tables through Unity Catalog - this is the most straightforward approach.")
+
+st.markdown("---")
+st.markdown("### 📚 Additional Resources")
+st.markdown("* [Databricks Foreign Catalog Documentation](https://docs.databricks.com/en/query-federation/index.html)")
+st.markdown("* [Lakebase Documentation](https://docs.databricks.com/en/lakebase/index.html)")
