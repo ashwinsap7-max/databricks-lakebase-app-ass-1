@@ -1,10 +1,9 @@
 import os
 import streamlit as st
 from databricks.sdk import WorkspaceClient
-from databricks import sql
 from datetime import datetime
 
-# Initialize Databricks client to get authentication token
+# Initialize Databricks client
 w = WorkspaceClient()
 
 # SQL Warehouse configuration
@@ -14,23 +13,21 @@ SQL_WAREHOUSE_ID = "50388acf2e5bb865"  # Serverless Starter Warehouse
 CATALOG = "workspace"
 SCHEMA = "support_tickets"
 
-# Helper functions to query Unity Catalog
+# Helper functions to query Unity Catalog using SDK
 def execute_query(query):
-    """Execute SQL query against Unity Catalog using token auth"""
+    """Execute SQL query using Databricks SDK Statement Execution API"""
     try:
-        # Use token-based authentication (works in Apps environment)
-        connection = sql.connect(
-            server_hostname=os.environ.get("DATABRICKS_HOST", "dbc-b94e27de-a220.cloud.databricks.com"),
-            http_path=f"/sql/1.0/warehouses/{SQL_WAREHOUSE_ID}",
-            # Use the SDK's auth token
-            credentials_provider=w.config.authenticate
+        # Use the SDK's statement execution API (works in Apps environment)
+        result = w.statement_execution.execute_statement(
+            warehouse_id=SQL_WAREHOUSE_ID,
+            statement=query,
+            wait_timeout="30s"
         )
         
-        with connection:
-            with connection.cursor() as cursor:
-                cursor.execute(query)
-                result = cursor.fetchall()
-                return result
+        # Extract results
+        if result.result and result.result.data_array:
+            return result.result.data_array
+        return []
     except Exception as e:
         st.error(f"Query failed: {str(e)}")
         return []
@@ -60,12 +57,15 @@ def create_ticket(title, status, created_by):
         # Get max ticket_id
         max_id_query = f"SELECT COALESCE(MAX(ticket_id), 0) as max_id FROM {CATALOG}.{SCHEMA}.tickets"
         result = execute_query(max_id_query)
-        new_id = result[0][0] + 1 if result else 1
+        new_id = int(result[0][0]) + 1 if result and result[0] else 1
+        
+        # Escape single quotes
+        safe_title = title.replace("'", "''")
         
         # Insert new ticket
         query = f"""
             INSERT INTO {CATALOG}.{SCHEMA}.tickets 
-            VALUES ({new_id}, '{title}', '{status}', '{created_by}', '{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+            VALUES ({new_id}, '{safe_title}', '{status}', '{created_by}', '{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
         """
         execute_query(query)
         return new_id
@@ -79,7 +79,7 @@ def add_message(ticket_id, message_text, author):
         # Get max message_id
         max_id_query = f"SELECT COALESCE(MAX(message_id), 0) as max_id FROM {CATALOG}.{SCHEMA}.ticket_messages"
         result = execute_query(max_id_query)
-        new_id = result[0][0] + 1 if result else 1
+        new_id = int(result[0][0]) + 1 if result and result[0] else 1
         
         # Escape single quotes
         safe_text = message_text.replace("'", "''")
@@ -205,8 +205,7 @@ elif page == "Create Ticket":
         
         if submitted:
             if ticket_title and ticket_creator:
-                safe_title = ticket_title.replace("'", "''")
-                new_id = create_ticket(safe_title, ticket_status, ticket_creator)
+                new_id = create_ticket(ticket_title, ticket_status, ticket_creator)
                 if new_id:
                     st.success(f"Ticket #{new_id} '{ticket_title}' created successfully!")
                     st.balloons()
