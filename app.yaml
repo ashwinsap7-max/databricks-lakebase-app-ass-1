@@ -2,11 +2,11 @@ command:
   - streamlit
   - run
   - app.py
-  - --server.port=8000
+  - --server.port=8080
 
 resources:
   - name: lakebase-postgres
     database:
       project: dataexperts-ash-ass1
-      branch: br-summer-tooth-d86hose5
+      branch: summer-tooth
       database: support-app
