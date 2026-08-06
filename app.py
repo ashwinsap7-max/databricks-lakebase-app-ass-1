@@ -18,14 +18,6 @@ db_user = os.environ.get("PGUSER")
 db_password = os.environ.get("PGPASSWORD", "")  # Try PGPASSWORD first
 db_port = int(os.environ.get("PGPORT", "5432"))
 
-# Debug: Print environment variables (remove after testing)
-st.sidebar.write("**Debug Info:**")
-st.sidebar.write(f"PGHOST: {db_host}")
-st.sidebar.write(f"PGDATABASE: {db_name}")
-st.sidebar.write(f"PGUSER: {db_user}")
-st.sidebar.write(f"PGPORT: {db_port}")
-st.sidebar.write(f"PGPASSWORD set: {'Yes' if db_password else 'No'}")
-
 # Create SQLAlchemy engine with credentials
 engine = create_engine(
     f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?sslmode=require"
@@ -96,6 +88,15 @@ def update_ticket_status(ticket_id, new_status):
 # Streamlit UI
 st.set_page_config(page_title="Support Center", page_icon="🎫", layout="wide")
 st.title("🎫 Support Ticket Center")
+
+# Debug: Print environment variables (remove after testing)
+st.sidebar.write("**Debug Info:**")
+st.sidebar.write(f"PGHOST: {db_host}")
+st.sidebar.write(f"PGDATABASE: {db_name}")
+st.sidebar.write(f"PGUSER: {db_user}")
+st.sidebar.write(f"PGPORT: {db_port}")
+st.sidebar.write(f"PGPASSWORD set: {'Yes' if db_password else 'No'}")
+st.sidebar.markdown("---")
 
 # Sidebar for navigation
 page = st.sidebar.radio("Navigation", ["View Tickets", "Create Ticket"])
