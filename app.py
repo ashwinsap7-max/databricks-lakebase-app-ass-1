@@ -4,7 +4,7 @@ from databricks.sdk import WorkspaceClient
 from databricks import sql
 from datetime import datetime
 
-# Initialize Databricks client
+# Initialize Databricks client to get authentication token
 w = WorkspaceClient()
 
 # SQL Warehouse configuration
@@ -16,17 +16,23 @@ SCHEMA = "support_tickets"
 
 # Helper functions to query Unity Catalog
 def execute_query(query):
-    """Execute SQL query against Unity Catalog"""
+    """Execute SQL query against Unity Catalog using token auth"""
     try:
-        with sql.connect(
+        # Use token-based authentication (works in Apps environment)
+        connection = sql.connect(
             server_hostname=os.environ.get("DATABRICKS_HOST", "dbc-b94e27de-a220.cloud.databricks.com"),
-            http_path=f"/sql/1.0/warehouses/{SQL_WAREHOUSE_ID}"
-        ) as connection:
+            http_path=f"/sql/1.0/warehouses/{SQL_WAREHOUSE_ID}",
+            # Use the SDK's auth token
+            credentials_provider=w.config.authenticate
+        )
+        
+        with connection:
             with connection.cursor() as cursor:
                 cursor.execute(query)
-                return cursor.fetchall()
+                result = cursor.fetchall()
+                return result
     except Exception as e:
-        st.error(f"Query failed: {e}")
+        st.error(f"Query failed: {str(e)}")
         return []
 
 def get_all_tickets():
@@ -50,44 +56,54 @@ def get_ticket_messages(ticket_id):
 
 def create_ticket(title, status, created_by):
     """Create a new support ticket"""
-    # Get max ticket_id
-    max_id_query = f"SELECT COALESCE(MAX(ticket_id), 0) as max_id FROM {CATALOG}.{SCHEMA}.tickets"
-    result = execute_query(max_id_query)
-    new_id = result[0][0] + 1 if result else 1
-    
-    # Insert new ticket
-    query = f"""
-        INSERT INTO {CATALOG}.{SCHEMA}.tickets 
-        VALUES ({new_id}, '{title}', '{status}', '{created_by}', '{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-    """
-    execute_query(query)
-    return new_id
+    try:
+        # Get max ticket_id
+        max_id_query = f"SELECT COALESCE(MAX(ticket_id), 0) as max_id FROM {CATALOG}.{SCHEMA}.tickets"
+        result = execute_query(max_id_query)
+        new_id = result[0][0] + 1 if result else 1
+        
+        # Insert new ticket
+        query = f"""
+            INSERT INTO {CATALOG}.{SCHEMA}.tickets 
+            VALUES ({new_id}, '{title}', '{status}', '{created_by}', '{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+        """
+        execute_query(query)
+        return new_id
+    except Exception as e:
+        st.error(f"Failed to create ticket: {str(e)}")
+        return None
 
 def add_message(ticket_id, message_text, author):
     """Add a message to an existing ticket"""
-    # Get max message_id
-    max_id_query = f"SELECT COALESCE(MAX(message_id), 0) as max_id FROM {CATALOG}.{SCHEMA}.ticket_messages"
-    result = execute_query(max_id_query)
-    new_id = result[0][0] + 1 if result else 1
-    
-    # Escape single quotes
-    safe_text = message_text.replace("'", "''")
-    
-    # Insert new message
-    query = f"""
-        INSERT INTO {CATALOG}.{SCHEMA}.ticket_messages 
-        VALUES ({new_id}, {ticket_id}, '{safe_text}', '{author}', '{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-    """
-    execute_query(query)
+    try:
+        # Get max message_id
+        max_id_query = f"SELECT COALESCE(MAX(message_id), 0) as max_id FROM {CATALOG}.{SCHEMA}.ticket_messages"
+        result = execute_query(max_id_query)
+        new_id = result[0][0] + 1 if result else 1
+        
+        # Escape single quotes
+        safe_text = message_text.replace("'", "''")
+        
+        # Insert new message
+        query = f"""
+            INSERT INTO {CATALOG}.{SCHEMA}.ticket_messages 
+            VALUES ({new_id}, {ticket_id}, '{safe_text}', '{author}', '{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+        """
+        execute_query(query)
+    except Exception as e:
+        st.error(f"Failed to add message: {str(e)}")
 
 def update_ticket_status(ticket_id, new_status):
     """Update the status of a ticket"""
-    query = f"""
-        UPDATE {CATALOG}.{SCHEMA}.tickets 
-        SET status = '{new_status}' 
-        WHERE ticket_id = {ticket_id}
-    """
-    execute_query(query)
+    try:
+        query = f"""
+            UPDATE {CATALOG}.{SCHEMA}.tickets 
+            SET status = '{new_status}' 
+            WHERE ticket_id = {ticket_id}
+        """
+        execute_query(query)
+    except Exception as e:
+        st.error(f"Failed to update status: {str(e)}")
 
 # Streamlit UI
 st.set_page_config(page_title="Support Center", page_icon="🎫", layout="wide")
@@ -116,7 +132,7 @@ if page == "View Tickets":
         if status_filter != "All":
             tickets = [t for t in tickets if t[2] == status_filter]
         
-        # Display tickets in a table
+        # Display tickets
         st.subheader(f"Total Tickets: {len(tickets)}")
         
         for ticket in tickets:
@@ -191,8 +207,9 @@ elif page == "Create Ticket":
             if ticket_title and ticket_creator:
                 safe_title = ticket_title.replace("'", "''")
                 new_id = create_ticket(safe_title, ticket_status, ticket_creator)
-                st.success(f"Ticket #{new_id} '{ticket_title}' created successfully!")
-                st.balloons()
+                if new_id:
+                    st.success(f"Ticket #{new_id} '{ticket_title}' created successfully!")
+                    st.balloons()
             else:
                 st.error("Please fill in all required fields")
 
