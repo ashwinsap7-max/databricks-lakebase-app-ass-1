@@ -1,4 +1,5 @@
 import os
+import base64
 import streamlit as st
 from sqlalchemy import create_engine, text
 from databricks.sdk import WorkspaceClient
@@ -11,11 +12,19 @@ w = WorkspaceClient()
 secret_scope = "lakebase"  # The secret scope name
 
 try:
-    db_host = w.secrets.get_secret(scope=secret_scope, key="pghost").value
-    db_user = w.secrets.get_secret(scope=secret_scope, key="pguser").value
+    # Read secrets and decode from base64
+    db_host_encoded = w.secrets.get_secret(scope=secret_scope, key="pghost").value
+    db_user_encoded = w.secrets.get_secret(scope=secret_scope, key="pguser").value
     db_password = w.secrets.get_secret(scope=secret_scope, key="pgpassword").value
-    db_name = w.secrets.get_secret(scope=secret_scope, key="pgdatabase").value
-    db_port = int(w.secrets.get_secret(scope=secret_scope, key="pgport").value)
+    db_name_encoded = w.secrets.get_secret(scope=secret_scope, key="pgdatabase").value
+    db_port_encoded = w.secrets.get_secret(scope=secret_scope, key="pgport").value
+    
+    # Decode base64 values
+    db_host = base64.b64decode(db_host_encoded).decode('utf-8')
+    db_user = base64.b64decode(db_user_encoded).decode('utf-8')
+    db_name = base64.b64decode(db_name_encoded).decode('utf-8')
+    db_port = int(base64.b64decode(db_port_encoded).decode('utf-8'))
+    
 except Exception as e:
     st.error(f"Failed to read database secrets: {e}")
     st.info("Please ensure the 'lakebase' secret scope exists with keys: pghost, pguser, pgpassword, pgdatabase, pgport")
