@@ -1,85 +1,184 @@
 import os
 import streamlit as st
 from databricks.sdk import WorkspaceClient
+from databricks import sql
 from datetime import datetime
 
 # Initialize Databricks client
 w = WorkspaceClient()
 
-# Lakebase project configuration
-PROJECT_NAME = "dataexperts-ash-ass1"
-BRANCH_NAME = "production"
-DATABASE_NAME = "support-app"
+# SQL Warehouse configuration
+SQL_WAREHOUSE_ID = "50388acf2e5bb865"  # Serverless Starter Warehouse
 
-# Helper function to execute Lakebase SQL
-def execute_lakebase_query(sql, params=None):
-    """Execute a SQL query against Lakebase using Databricks SDK"""
+# Unity Catalog tables
+CATALOG = "workspace"
+SCHEMA = "support_tickets"
+
+# Helper functions to query Unity Catalog
+def execute_query(query):
+    """Execute SQL query against Unity Catalog"""
     try:
-        # Note: This uses internal Databricks APIs to route queries to Lakebase
-        # The executeLakebasePostgresSql tool pattern
-        from databricks.sdk.service.sql import ExecuteStatementRequestOnWaitTimeout
-        
-        # Create a simple wrapper that executes via SQL execution API
-        # targeting the Lakebase compute endpoint
-        
-        # For now, return mock data
-        # TODO: Implement proper API-based query execution
-        return []
+        with sql.connect(
+            server_hostname=os.environ.get("DATABRICKS_HOST", "dbc-b94e27de-a220.cloud.databricks.com"),
+            http_path=f"/sql/1.0/warehouses/{SQL_WAREHOUSE_ID}"
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+                return cursor.fetchall()
     except Exception as e:
         st.error(f"Query failed: {e}")
         return []
+
+def get_all_tickets():
+    """Fetch all support tickets"""
+    query = f"""
+        SELECT ticket_id, title, status, created_by, created_at 
+        FROM {CATALOG}.{SCHEMA}.tickets 
+        ORDER BY created_at DESC
+    """
+    return execute_query(query)
+
+def get_ticket_messages(ticket_id):
+    """Fetch all messages for a specific ticket"""
+    query = f"""
+        SELECT message_id, message_text, author, created_at 
+        FROM {CATALOG}.{SCHEMA}.ticket_messages 
+        WHERE ticket_id = {ticket_id} 
+        ORDER BY created_at ASC
+    """
+    return execute_query(query)
+
+def create_ticket(title, status, created_by):
+    """Create a new support ticket"""
+    # Get max ticket_id
+    max_id_query = f"SELECT COALESCE(MAX(ticket_id), 0) as max_id FROM {CATALOG}.{SCHEMA}.tickets"
+    result = execute_query(max_id_query)
+    new_id = result[0][0] + 1 if result else 1
+    
+    # Insert new ticket
+    query = f"""
+        INSERT INTO {CATALOG}.{SCHEMA}.tickets 
+        VALUES ({new_id}, '{title}', '{status}', '{created_by}', '{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+    """
+    execute_query(query)
+    return new_id
+
+def add_message(ticket_id, message_text, author):
+    """Add a message to an existing ticket"""
+    # Get max message_id
+    max_id_query = f"SELECT COALESCE(MAX(message_id), 0) as max_id FROM {CATALOG}.{SCHEMA}.ticket_messages"
+    result = execute_query(max_id_query)
+    new_id = result[0][0] + 1 if result else 1
+    
+    # Escape single quotes
+    safe_text = message_text.replace("'", "''")
+    
+    # Insert new message
+    query = f"""
+        INSERT INTO {CATALOG}.{SCHEMA}.ticket_messages 
+        VALUES ({new_id}, {ticket_id}, '{safe_text}', '{author}', '{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+    """
+    execute_query(query)
+
+def update_ticket_status(ticket_id, new_status):
+    """Update the status of a ticket"""
+    query = f"""
+        UPDATE {CATALOG}.{SCHEMA}.tickets 
+        SET status = '{new_status}' 
+        WHERE ticket_id = {ticket_id}
+    """
+    execute_query(query)
 
 # Streamlit UI
 st.set_page_config(page_title="Support Center", page_icon="🎫", layout="wide")
 st.title("🎫 Support Ticket Center")
 
-st.info("📊 **Data Source:** Lakebase Postgres (`support-app` database)")
+st.success("✅ Connected to Unity Catalog")
+st.caption(f"Data Source: `{CATALOG}.{SCHEMA}` (Delta tables)")
 
 # Sidebar for navigation
-page = st.sidebar.radio("Navigation", ["View Tickets", "Create Ticket", "About"])
+page = st.sidebar.radio("Navigation", ["View Tickets", "Create Ticket"])
 
 if page == "View Tickets":
     st.header("All Support Tickets")
     
-    st.warning("⚠️ **Implementation Note:** API-based Lakebase queries are being configured.")
+    # Filter by status
+    status_filter = st.selectbox(
+        "Filter by Status", 
+        ["All", "open", "in_progress", "resolved"]
+    )
     
-    st.markdown("""
-    ### Current Status
+    # Fetch and display tickets
+    tickets = get_all_tickets()
     
-    * ✅ Lakebase database created: `support-app`
-    * ✅ Tables created: `service_mgmt.tickets`, `service_mgmt.ticket_messages`
-    * ✅ Sample data inserted (5 tickets, 10+ messages)
-    * ⏳ **In Progress:** Configuring API-based query execution
-    
-    ### Next Steps
-    
-    The app needs to query Lakebase through the Databricks SDK/API rather than direct connections,
-    as network policies prevent external database connections from Databricks Apps.
-    
-    """)
-    
-    # Show sample of what the data looks like
-    st.subheader("Sample Ticket Structure")
-    st.code("""
-    Table: service_mgmt.tickets
-    - ticket_id (SERIAL PRIMARY KEY)
-    - title (VARCHAR(200))
-    - status (VARCHAR(50))  -- 'open', 'in_progress', 'resolved'
-    - created_by (VARCHAR(100))
-    - created_at (TIMESTAMP)
-    
-    Table: service_mgmt.ticket_messages
-    - message_id (SERIAL PRIMARY KEY)
-    - ticket_id (INTEGER FK)
-    - message_text (TEXT)
-    - author (VARCHAR(100))
-    - created_at (TIMESTAMP)
-    """, language="sql")
+    if tickets:
+        # Filter tickets if needed
+        if status_filter != "All":
+            tickets = [t for t in tickets if t[2] == status_filter]
+        
+        # Display tickets in a table
+        st.subheader(f"Total Tickets: {len(tickets)}")
+        
+        for ticket in tickets:
+            ticket_id, title, status, created_by, created_at = ticket
+            
+            with st.expander(f"#{ticket_id} - {title} [{status}]"):
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    st.write(f"**Created by:** {created_by}")
+                    st.write(f"**Created at:** {created_at}")
+                    st.write(f"**Status:** {status}")
+                
+                with col2:
+                    # Update status
+                    new_status = st.selectbox(
+                        "Update Status",
+                        ["open", "in_progress", "resolved"],
+                        index=["open", "in_progress", "resolved"].index(status),
+                        key=f"status_{ticket_id}"
+                    )
+                    
+                    if st.button("Update", key=f"update_{ticket_id}"):
+                        if new_status != status:
+                            update_ticket_status(ticket_id, new_status)
+                            st.success(f"Status updated to {new_status}")
+                            st.rerun()
+                
+                # Display messages
+                st.markdown("---")
+                st.subheader("Messages")
+                messages = get_ticket_messages(ticket_id)
+                
+                if messages:
+                    for msg in messages:
+                        msg_id, msg_text, author, msg_created_at = msg
+                        st.markdown(f"**{author}** *({msg_created_at})*")
+                        st.write(msg_text)
+                        st.markdown("")
+                else:
+                    st.info("No messages yet")
+                
+                # Add new message
+                st.markdown("---")
+                st.subheader("Add a Message")
+                
+                with st.form(key=f"msg_form_{ticket_id}"):
+                    new_message = st.text_area("Message", key=f"msg_text_{ticket_id}")
+                    message_author = st.text_input("Your Email", key=f"msg_author_{ticket_id}")
+                    
+                    if st.form_submit_button("Send Message"):
+                        if new_message and message_author:
+                            add_message(ticket_id, new_message, message_author)
+                            st.success("Message added!")
+                            st.rerun()
+                        else:
+                            st.error("Please fill in all fields")
+    else:
+        st.info("No tickets found")
 
 elif page == "Create Ticket":
     st.header("Create New Support Ticket")
-    
-    st.info("Ticket creation will be enabled once API-based query execution is configured.")
     
     with st.form("create_ticket_form"):
         ticket_title = st.text_input("Ticket Title *")
@@ -89,43 +188,19 @@ elif page == "Create Ticket":
         submitted = st.form_submit_button("Create Ticket")
         
         if submitted:
-            st.warning("Feature coming soon - pending API configuration")
-
-elif page == "About":
-    st.header("About This App")
-    
-    st.markdown("""
-    ### Architecture
-    
-    This Databricks App connects to a **Lakebase Postgres database** to manage support tickets.
-    
-    **Technical Stack:**
-    * **Frontend:** Streamlit (Python web framework)
-    * **Database:** Lakebase Postgres (`support-app`)
-    * **Connection Method:** Databricks SDK/API (due to network restrictions)
-    * **Deployment:** Databricks Apps V2
-    
-    ### Database Schema
-    
-    * **Project:** `dataexperts-ash-ass1`
-    * **Branch:** `production`  
-    * **Database:** `support-app`
-    * **Schema:** `service_mgmt`
-    * **Tables:** `tickets`, `ticket_messages`
-    
-    ### Why API-based queries?
-    
-    Databricks Apps cannot make direct external connections to Lakebase Postgres endpoints.
-    Instead, queries must route through Databricks internal APIs, similar to how the
-    workspace query tools access Lakebase.
-    
-    """)
+            if ticket_title and ticket_creator:
+                safe_title = ticket_title.replace("'", "''")
+                new_id = create_ticket(safe_title, ticket_status, ticket_creator)
+                st.success(f"Ticket #{new_id} '{ticket_title}' created successfully!")
+                st.balloons()
+            else:
+                st.error("Please fill in all required fields")
 
 # Footer
 st.sidebar.markdown("---")
 st.sidebar.info(f"""
-**Lakebase Connection**  
-Project: {PROJECT_NAME}  
-Branch: {BRANCH_NAME}  
-Database: {DATABASE_NAME}
+**Data Source**  
+Catalog: {CATALOG}  
+Schema: {SCHEMA}  
+Tables: tickets, ticket_messages
 """)
